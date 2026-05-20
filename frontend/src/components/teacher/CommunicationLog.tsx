@@ -1,0 +1,144 @@
+import { useState, useEffect, useCallback } from 'react';
+import type { Student, CommunicationLog as CommLog } from '../../types';
+import api from '../../api/client';
+
+interface Props {
+  students: Student[];
+}
+
+function today(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+export default function CommunicationLog({ students }: Props) {
+  const [date, setDate] = useState(today());
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [allLogs, setAllLogs] = useState<CommLog[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+
+  const fetchData = useCallback(async () => {
+    const [mineRes, allRes] = await Promise.all([
+      api.get<number[]>(`/communications/mine?date=${date}`),
+      api.get<CommLog[]>(`/communications?date=${date}`),
+    ]);
+    setChecked(new Set(mineRes.data));
+    setAllLogs(allRes.data);
+  }, [date]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  function toggle(id: number) {
+    setChecked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSavedMsg('');
+    try {
+      await api.post('/communications', { shift_date: date, student_ids: [...checked] });
+      setSavedMsg('保存しました');
+      await fetchData();
+      setTimeout(() => setSavedMsg(''), 3000);
+    } catch {
+      setSavedMsg('保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Group logs by teacher for display
+  const byTeacher = allLogs.reduce<Record<string, string[]>>((acc, log) => {
+    if (!acc[log.teacher_name]) acc[log.teacher_name] = [];
+    acc[log.teacher_name].push(log.student_name);
+    return acc;
+  }, {});
+
+  return (
+    <div className="p-4 md:p-6 max-w-3xl">
+      <h2 className="text-xl font-bold text-gray-800 mb-6">コミュニケーション記録</h2>
+
+      {/* Date picker */}
+      <div className="card mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">シフト日</label>
+        <input
+          type="date"
+          value={date}
+          onChange={e => setDate(e.target.value)}
+          className="input-field w-auto"
+        />
+      </div>
+
+      {/* My checklist */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-700">この日に話した生徒</h3>
+          <span className="text-sm text-blue-600 font-medium">{checked.size}名選択中</span>
+        </div>
+
+        {students.length === 0 ? (
+          <p className="text-gray-400 text-sm">生徒が登録されていません</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {students.map(student => (
+              <label
+                key={student.id}
+                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  checked.has(student.id)
+                    ? 'border-blue-400 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked.has(student.id)}
+                  onChange={() => toggle(student.id)}
+                  className="w-4 h-4 text-blue-600 rounded"
+                />
+                <span className="text-sm font-medium text-gray-700">{student.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100">
+          <button onClick={handleSave} disabled={saving} className="btn-primary">
+            {saving ? '保存中...' : '記録を保存'}
+          </button>
+          {savedMsg && (
+            <span className={`text-sm font-medium ${savedMsg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>
+              {savedMsg}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* All teachers on this date */}
+      <div className="card">
+        <h3 className="font-semibold text-gray-700 mb-4">
+          {date} の全講師記録
+        </h3>
+        {Object.keys(byTeacher).length === 0 ? (
+          <p className="text-gray-400 text-sm">この日の記録はまだありません</p>
+        ) : (
+          <div className="space-y-3">
+            {Object.entries(byTeacher).map(([teacher, studs]) => (
+              <div key={teacher} className="flex gap-3">
+                <span className="text-sm font-semibold text-gray-700 w-24 flex-shrink-0">{teacher}</span>
+                <div className="flex flex-wrap gap-1">
+                  {studs.map(s => (
+                    <span key={s} className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">{s}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
