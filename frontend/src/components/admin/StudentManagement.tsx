@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Student } from '../../types';
 import api from '../../api/client';
 
@@ -21,6 +21,8 @@ export default function StudentManagement() {
   const [form, setForm] = useState({ name: '', grade: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [selectedGrade, setSelectedGrade] = useState('all');
+  const [sortBy, setSortBy] = useState<'name' | 'grade'>('grade');
 
   // Bulk state
   const [bulkText, setBulkText] = useState('');
@@ -34,6 +36,23 @@ export default function StudentManagement() {
   }
 
   useEffect(() => { load(); }, []);
+
+  const grades = useMemo(() => {
+    const set = new Set(students.map(s => s.grade).filter(Boolean));
+    return ['all', ...Array.from(set).sort()];
+  }, [students]);
+
+  const displayedStudents = useMemo(() => {
+    return students
+      .filter(s => selectedGrade === 'all' || s.grade === selectedGrade)
+      .sort((a, b) => {
+        if (sortBy === 'grade') {
+          if (a.grade !== b.grade) return a.grade.localeCompare(b.grade, 'ja');
+          return a.name.localeCompare(b.name, 'ja');
+        }
+        return a.name.localeCompare(b.name, 'ja');
+      });
+  }, [students, selectedGrade, sortBy]);
 
   // Parse bulk text into student list
   function parseBulkText(text: string): ParsedStudent[] {
@@ -120,7 +139,7 @@ export default function StudentManagement() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-800">生徒管理</h2>
         <div className="flex gap-2">
           <button onClick={openBulkModal} className="btn-secondary flex items-center gap-2">
@@ -128,6 +147,40 @@ export default function StudentManagement() {
           </button>
           <button onClick={openAdd} className="btn-primary flex items-center gap-2">
             ＋ 生徒を追加
+          </button>
+        </div>
+      </div>
+
+      {/* フィルター・並び替え */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex flex-wrap gap-1">
+          {grades.map(g => (
+            <button
+              key={g}
+              onClick={() => setSelectedGrade(g)}
+              className={`text-sm px-3 py-1 rounded-full border transition-colors ${
+                selectedGrade === g
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+              }`}
+            >
+              {g === 'all' ? `全員 (${students.length})` : `${g} (${students.filter(s => s.grade === g).length})`}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2 text-sm text-gray-600">
+          <span>並び替え：</span>
+          <button
+            onClick={() => setSortBy('grade')}
+            className={`px-3 py-1 rounded-full border transition-colors ${sortBy === 'grade' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 hover:border-gray-400'}`}
+          >
+            学年順
+          </button>
+          <button
+            onClick={() => setSortBy('name')}
+            className={`px-3 py-1 rounded-full border transition-colors ${sortBy === 'name' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 hover:border-gray-400'}`}
+          >
+            名前順
           </button>
         </div>
       </div>
@@ -143,9 +196,9 @@ export default function StudentManagement() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {students.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">生徒が登録されていません</td></tr>
-            ) : students.map(s => (
+            {displayedStudents.length === 0 ? (
+              <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">{students.length === 0 ? '生徒が登録されていません' : '該当する生徒がいません'}</td></tr>
+            ) : displayedStudents.map(s => (
               <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3 font-medium text-gray-800">{s.name}</td>
                 <td className="px-4 py-3 text-gray-500">{s.grade || '—'}</td>
