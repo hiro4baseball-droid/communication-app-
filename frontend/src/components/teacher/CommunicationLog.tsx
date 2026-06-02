@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Student, CommunicationLog as CommLog } from '../../types';
 import api from '../../api/client';
 
@@ -51,6 +51,21 @@ export default function CommunicationLog({ students }: Props) {
     }
   }
 
+  // Group students by grade for checkbox display
+  const studentsByGrade = useMemo(() => {
+    const sorted = [...students].sort((a, b) => {
+      if (a.grade !== b.grade) return a.grade.localeCompare(b.grade, 'ja');
+      return a.name.localeCompare(b.name, 'ja');
+    });
+    const map: Record<string, Student[]> = {};
+    for (const s of sorted) {
+      const key = s.grade || '学年未設定';
+      if (!map[key]) map[key] = [];
+      map[key].push(s);
+    }
+    return map;
+  }, [students]);
+
   // Group logs by teacher for display
   const byTeacher = allLogs.reduce<Record<string, string[]>>((acc, log) => {
     if (!acc[log.teacher_name]) acc[log.teacher_name] = [];
@@ -83,24 +98,31 @@ export default function CommunicationLog({ students }: Props) {
         {students.length === 0 ? (
           <p className="text-gray-400 text-sm">生徒が登録されていません</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {students.map(student => (
-              <label
-                key={student.id}
-                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  checked.has(student.id)
-                    ? 'border-blue-400 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked.has(student.id)}
-                  onChange={() => toggle(student.id)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span className="text-sm font-medium text-gray-700">{student.name}</span>
-              </label>
+          <div className="space-y-4">
+            {Object.entries(studentsByGrade).sort(([a], [b]) => a.localeCompare(b, 'ja')).map(([grade, studs]) => (
+              <div key={grade}>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{grade}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {studs.map(student => (
+                    <label
+                      key={student.id}
+                      className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        checked.has(student.id)
+                          ? 'border-blue-400 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked.has(student.id)}
+                        onChange={() => toggle(student.id)}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span className="text-sm font-medium text-gray-700">{student.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}
