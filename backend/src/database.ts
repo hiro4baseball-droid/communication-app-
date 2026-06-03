@@ -66,6 +66,10 @@ async function initSchema(): Promise<void> {
     )`,
   ];
   await db.batch(stmts, 'write');
+  // Migration: add note column (no-op if already exists)
+  try {
+    await db.execute("ALTER TABLE communication_logs ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+  } catch {}
 }
 
 async function seedAdmin(): Promise<void> {

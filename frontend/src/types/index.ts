@@ -18,6 +18,7 @@ export interface CommunicationLog {
   shift_date: string;
   teacher_name: string;
   student_name: string;
+  note: string;
   created_at: string;
 }
 

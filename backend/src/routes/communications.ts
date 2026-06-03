@@ -30,17 +30,17 @@ router.get('/mine', authenticate, async (req: AuthRequest, res: Response): Promi
     if (!date) { res.json([]); return; }
     const db = await getDb();
     const rs = await db.execute({
-      sql: 'SELECT student_id FROM communication_logs WHERE teacher_id = ? AND shift_date = ?',
+      sql: 'SELECT student_id, note FROM communication_logs WHERE teacher_id = ? AND shift_date = ?',
       args: [req.user!.id, date as string],
     });
-    res.json(rs.rows.map((r: any) => Number(r.student_id)));
+    res.json(rs.rows.map((r: any) => ({ student_id: Number(r.student_id), note: r.note || '' })));
   } catch { res.status(500).json({ error: 'サーバーエラー' }); }
 });
 
 router.post('/', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { shift_date, student_ids } = req.body;
-  if (!shift_date || !Array.isArray(student_ids)) {
-    res.status(400).json({ error: 'shift_dateとstudent_idsが必要です' });
+  const { shift_date, entries } = req.body;
+  if (!shift_date || !Array.isArray(entries)) {
+    res.status(400).json({ error: 'shift_dateとentriesが必要です' });
     return;
   }
   try {
@@ -48,9 +48,9 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response): Promise<
     const teacher_id = req.user!.id;
     const stmts: InStatement[] = [
       { sql: 'DELETE FROM communication_logs WHERE teacher_id = ? AND shift_date = ?', args: [teacher_id, shift_date] },
-      ...(student_ids as number[]).map(sid => ({
-        sql: 'INSERT INTO communication_logs (teacher_id, student_id, shift_date) VALUES (?, ?, ?)',
-        args: [teacher_id, sid, shift_date],
+      ...(entries as Array<{ student_id: number; note: string }>).map(e => ({
+        sql: 'INSERT INTO communication_logs (teacher_id, student_id, shift_date, note) VALUES (?, ?, ?, ?)',
+        args: [teacher_id, e.student_id, shift_date, e.note || ''],
       })),
     ];
     await db.batch(stmts, 'write');

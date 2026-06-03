@@ -6,41 +6,54 @@ interface Props {
   students: Student[];
 }
 
+interface MineEntry {
+  student_id: number;
+  note: string;
+}
+
 function today(): string {
   return new Date().toISOString().split('T')[0];
 }
 
 export default function CommunicationLog({ students }: Props) {
   const [date, setDate] = useState(today());
-  const [checked, setChecked] = useState<Set<number>>(new Set());
+  // Map<student_id, note> — presence in map means checked
+  const [notes, setNotes] = useState<Map<number, string>>(new Map());
   const [allLogs, setAllLogs] = useState<CommLog[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
 
   const fetchData = useCallback(async () => {
     const [mineRes, allRes] = await Promise.all([
-      api.get<number[]>(`/communications/mine?date=${date}`),
+      api.get<MineEntry[]>(`/communications/mine?date=${date}`),
       api.get<CommLog[]>(`/communications?date=${date}`),
     ]);
-    setChecked(new Set(mineRes.data));
+    const map = new Map<number, string>();
+    for (const e of mineRes.data) map.set(e.student_id, e.note);
+    setNotes(map);
     setAllLogs(allRes.data);
   }, [date]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   function toggle(id: number) {
-    setChecked(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+    setNotes(prev => {
+      const next = new Map(prev);
+      if (next.has(id)) next.delete(id); else next.set(id, '');
       return next;
     });
+  }
+
+  function setNote(id: number, text: string) {
+    setNotes(prev => new Map(prev).set(id, text));
   }
 
   async function handleSave() {
     setSaving(true);
     setSavedMsg('');
     try {
-      await api.post('/communications', { shift_date: date, student_ids: [...checked] });
+      const entries = Array.from(notes.entries()).map(([student_id, note]) => ({ student_id, note }));
+      await api.post('/communications', { shift_date: date, entries });
       setSavedMsg('保存しました');
       await fetchData();
       setTimeout(() => setSavedMsg(''), 3000);
@@ -51,7 +64,7 @@ export default function CommunicationLog({ students }: Props) {
     }
   }
 
-  // Group students by grade for checkbox display
+  // Group students by grade for display
   const studentsByGrade = useMemo(() => {
     const sorted = [...students].sort((a, b) => {
       if (a.grade !== b.grade) return a.grade.localeCompare(b.grade, 'ja');
@@ -67,9 +80,9 @@ export default function CommunicationLog({ students }: Props) {
   }, [students]);
 
   // Group logs by teacher for display
-  const byTeacher = allLogs.reduce<Record<string, string[]>>((acc, log) => {
+  const byTeacher = allLogs.reduce<Record<string, CommLog[]>>((acc, log) => {
     if (!acc[log.teacher_name]) acc[log.teacher_name] = [];
-    acc[log.teacher_name].push(log.student_name);
+    acc[log.teacher_name].push(log);
     return acc;
   }, {});
 
@@ -92,35 +105,47 @@ export default function CommunicationLog({ students }: Props) {
       <div className="card mb-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-gray-700">この日に話した生徒</h3>
-          <span className="text-sm text-blue-600 font-medium">{checked.size}名選択中</span>
+          <span className="text-sm text-blue-600 font-medium">{notes.size}名選択中</span>
         </div>
 
         {students.length === 0 ? (
           <p className="text-gray-400 text-sm">生徒が登録されていません</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {Object.entries(studentsByGrade).sort(([a], [b]) => a.localeCompare(b, 'ja')).map(([grade, studs]) => (
               <div key={grade}>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{grade}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {studs.map(student => (
-                    <label
-                      key={student.id}
-                      className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                        checked.has(student.id)
-                          ? 'border-blue-400 bg-blue-50'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked.has(student.id)}
-                        onChange={() => toggle(student.id)}
-                        className="w-4 h-4 text-blue-600 rounded"
-                      />
-                      <span className="text-sm font-medium text-gray-700">{student.name}</span>
-                    </label>
-                  ))}
+                <div className="space-y-2">
+                  {studs.map(student => {
+                    const isChecked = notes.has(student.id);
+                    return (
+                      <div key={student.id} className={`rounded-lg border transition-colors ${isChecked ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
+                        <label className="flex items-center gap-2 p-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggle(student.id)}
+                            className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                          />
+                          <span className="text-sm font-medium text-gray-700">{student.name}</span>
+                          {isChecked && notes.get(student.id) && (
+                            <span className="ml-auto text-xs text-blue-500 truncate max-w-[150px]">{notes.get(student.id)}</span>
+                          )}
+                        </label>
+                        {isChecked && (
+                          <div className="px-3 pb-3">
+                            <textarea
+                              value={notes.get(student.id) || ''}
+                              onChange={e => setNote(student.id, e.target.value)}
+                              placeholder="一言メモ（任意）"
+                              rows={2}
+                              className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-400 bg-white resize-none placeholder-gray-300"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -147,13 +172,16 @@ export default function CommunicationLog({ students }: Props) {
         {Object.keys(byTeacher).length === 0 ? (
           <p className="text-gray-400 text-sm">この日の記録はまだありません</p>
         ) : (
-          <div className="space-y-3">
-            {Object.entries(byTeacher).map(([teacher, studs]) => (
-              <div key={teacher} className="flex gap-3">
-                <span className="text-sm font-semibold text-gray-700 w-24 flex-shrink-0">{teacher}</span>
-                <div className="flex flex-wrap gap-1">
-                  {studs.map(s => (
-                    <span key={s} className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">{s}</span>
+          <div className="space-y-4">
+            {Object.entries(byTeacher).map(([teacher, logs]) => (
+              <div key={teacher}>
+                <p className="text-sm font-semibold text-gray-700 mb-1">{teacher}</p>
+                <div className="space-y-1 pl-2">
+                  {logs.map(log => (
+                    <div key={log.id} className="flex items-start gap-2">
+                      <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5">{log.student_name}</span>
+                      {log.note && <span className="text-xs text-gray-500">{log.note}</span>}
+                    </div>
                   ))}
                 </div>
               </div>
