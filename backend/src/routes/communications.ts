@@ -9,17 +9,25 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response): Promise<v
   try {
     const { date } = req.query;
     const db = await getDb();
+    const { student_id } = req.query;
     const base = `
-      SELECT cl.id, cl.shift_date, cl.created_at,
+      SELECT cl.id, cl.shift_date, cl.note, cl.created_at,
              u.id as teacher_id, u.name as teacher_name,
              s.id as student_id, s.name as student_name
       FROM communication_logs cl
       JOIN users u ON cl.teacher_id = u.id
       JOIN students s ON cl.student_id = s.id
     `;
-    const rs = date
-      ? await db.execute({ sql: base + ' WHERE cl.shift_date = ? ORDER BY u.name, s.name', args: [date as string] })
-      : await db.execute(base + ' ORDER BY cl.shift_date DESC, u.name, s.name');
+    let rs;
+    if (date && student_id) {
+      rs = await db.execute({ sql: base + ' WHERE cl.shift_date = ? AND cl.student_id = ? ORDER BY u.name', args: [date as string, student_id as string] });
+    } else if (date) {
+      rs = await db.execute({ sql: base + ' WHERE cl.shift_date = ? ORDER BY u.name, s.name', args: [date as string] });
+    } else if (student_id) {
+      rs = await db.execute({ sql: base + ' WHERE cl.student_id = ? ORDER BY cl.shift_date DESC, u.name', args: [student_id as string] });
+    } else {
+      rs = await db.execute(base + ' ORDER BY cl.shift_date DESC, u.name, s.name');
+    }
     res.json(rs.rows);
   } catch { res.status(500).json({ error: 'サーバーエラー' }); }
 });

@@ -4,11 +4,13 @@ import Layout from '../components/layout/Layout';
 import StudentManagement from '../components/admin/StudentManagement';
 import TeacherManagement from '../components/admin/TeacherManagement';
 import ActivityDashboard from '../components/admin/ActivityDashboard';
+import AdminStudentRecord from '../components/admin/AdminStudentRecord';
 
-type AdminTab = 'students' | 'teachers' | 'activity';
+type AdminTab = 'students' | 'records' | 'teachers' | 'activity';
 
 const navItems: { key: AdminTab; label: string; icon: string }[] = [
   { key: 'students', label: '生徒管理', icon: '👤' },
+  { key: 'records', label: '生徒カルテ', icon: '📋' },
   { key: 'teachers', label: '講師管理', icon: '👨‍🏫' },
   { key: 'activity', label: '活動状況', icon: '📊' },
 ];
@@ -52,6 +54,7 @@ export default function AdminPage() {
     >
       <div className="p-4 md:p-6">
         {activeTab === 'students' && <StudentManagement />}
+        {activeTab === 'records' && <AdminStudentRecord />}
         {activeTab === 'teachers' && <TeacherManagement />}
         {activeTab === 'activity' && <ActivityDashboard />}
       </div>
