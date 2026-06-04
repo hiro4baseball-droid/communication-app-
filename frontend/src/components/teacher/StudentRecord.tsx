@@ -47,6 +47,11 @@ export default function StudentRecordView({ students, initialStudentId }: Props)
     }
   }
 
+  const sorted = [...students].sort((a, b) => {
+    if (a.grade !== b.grade) return a.grade.localeCompare(b.grade, 'ja');
+    return a.name.localeCompare(b.name, 'ja');
+  });
+
   const selected = students.find(s => s.id === selectedId);
 
   return (
@@ -62,7 +67,7 @@ export default function StudentRecordView({ students, initialStudentId }: Props)
           className="input-field w-full"
         >
           <option value="">-- 生徒を選んでください --</option>
-          {students.map(s => (
+          {sorted.map(s => (
             <option key={s.id} value={s.id}>{s.name}{s.grade ? ` (${s.grade})` : ''}</option>
           ))}
         </select>
