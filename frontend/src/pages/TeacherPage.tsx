@@ -26,9 +26,9 @@ export default function TeacherPage() {
 
   const tabs: { key: Tab; label: string; icon: string }[] = [
     { key: 'communication', label: 'コミュニケーション記録', icon: '💬' },
+    { key: 'parent', label: '保護者報告', icon: '📞' },
     { key: 'record', label: '生徒カルテ', icon: '📋' },
     { key: 'effort', label: '頑張ったカード', icon: '🌟' },
-    { key: 'parent', label: '保護者報告', icon: '📞' },
   ];
 
   return (
