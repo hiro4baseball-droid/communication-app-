@@ -1,175 +1,231 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Student, ParentReport } from '../../types';
+import { Student } from '../../types';
 import api from '../../api/client';
 
 interface Props {
   students: Student[];
-  initialStudentId?: number;
 }
+
+interface MineEntry { student_id: number; note: string; }
+interface AllEntry { id: number; report_date: string; note: string; teacher_name: string; student_id: number; student_name: string; }
+interface LastDate { student_id: number; last_date: string; }
 
 function today(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-export default function ParentReportView({ students, initialStudentId }: Props) {
-  const [selectedId, setSelectedId] = useState<number | null>(initialStudentId ?? null);
-  const [reports, setReports] = useState<ParentReport[]>([]);
-  const [reportDate, setReportDate] = useState(today());
-  const [content, setContent] = useState('');
+function daysSince(dateStr: string | undefined): number {
+  if (!dateStr) return Infinity;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+
+export default function ParentReportView({ students }: Props) {
+  const [date, setDate] = useState(today());
+  const [notes, setNotes] = useState<Map<number, string>>(new Map());
+  const [lastDates, setLastDates] = useState<Map<number, string>>(new Map());
+  const [allEntries, setAllEntries] = useState<AllEntry[]>([]);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [savedMsg, setSavedMsg] = useState('');
 
-  useEffect(() => {
-    if (initialStudentId) setSelectedId(initialStudentId);
-  }, [initialStudentId]);
+  const fetchData = useCallback(async () => {
+    const [mineRes, allRes, lastRes] = await Promise.all([
+      api.get<MineEntry[]>(`/parent-reports/mine?date=${date}`),
+      api.get<AllEntry[]>(`/parent-reports?date=${date}`),
+      api.get<LastDate[]>('/parent-reports/last-dates'),
+    ]);
+    const map = new Map<number, string>();
+    for (const e of mineRes.data) map.set(e.student_id, e.note);
+    setNotes(map);
+    setAllEntries(allRes.data);
+    const ldMap = new Map<number, string>();
+    for (const e of lastRes.data) ldMap.set(e.student_id, e.last_date);
+    setLastDates(ldMap);
+  }, [date]);
 
-  const fetchReports = useCallback(async (id: number) => {
-    const { data } = await api.get<ParentReport[]>(`/parent-reports?student_id=${id}`);
-    setReports(data);
-  }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (selectedId) fetchReports(selectedId);
-    else setReports([]);
-  }, [selectedId, fetchReports]);
-
-  const sortedStudents = useMemo(() => (
-    [...students].sort((a, b) => {
+  const studentsByGrade = useMemo(() => {
+    const sorted = [...students].sort((a, b) => {
       if (a.grade !== b.grade) return a.grade.localeCompare(b.grade, 'ja');
       return a.name.localeCompare(b.name, 'ja');
-    })
-  ), [students]);
+    });
+    const map: Record<string, Student[]> = {};
+    for (const s of sorted) {
+      const key = s.grade || '学年未設定';
+      if (!map[key]) map[key] = [];
+      map[key].push(s);
+    }
+    return map;
+  }, [students]);
 
-  const selected = students.find(s => s.id === selectedId);
+  function toggle(id: number) {
+    setNotes(prev => {
+      const next = new Map(prev);
+      if (next.has(id)) next.delete(id); else next.set(id, '');
+      return next;
+    });
+  }
+
+  function setNote(id: number, text: string) {
+    setNotes(prev => new Map(prev).set(id, text));
+  }
 
   async function handleSave() {
-    if (!selectedId || !content.trim()) return;
     setSaving(true);
-    setMsg('');
+    setSavedMsg('');
     try {
-      await api.post('/parent-reports', { student_id: selectedId, report_date: reportDate, content });
-      setContent('');
-      setReportDate(today());
-      setMsg('保存しました');
-      await fetchReports(selectedId);
-      setTimeout(() => setMsg(''), 3000);
+      const entries = Array.from(notes.entries()).map(([student_id, note]) => ({ student_id, note }));
+      await api.post('/parent-reports', { report_date: date, entries });
+      setSavedMsg('保存しました');
+      await fetchData();
+      setTimeout(() => setSavedMsg(''), 3000);
     } catch {
-      setMsg('保存に失敗しました');
+      setSavedMsg('保存に失敗しました');
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm('この記録を削除しますか？')) return;
-    await api.delete(`/parent-reports/${id}`);
-    if (selectedId) fetchReports(selectedId);
-  }
+  const byTeacher = allEntries.reduce<Record<string, AllEntry[]>>((acc, e) => {
+    if (!acc[e.teacher_name]) acc[e.teacher_name] = [];
+    acc[e.teacher_name].push(e);
+    return acc;
+  }, {});
+
+  const warnCount = students.filter(s => daysSince(lastDates.get(s.id)) >= 14).length;
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
       <h2 className="text-xl font-bold text-gray-800 mb-6">保護者報告</h2>
 
-      {/* Student selector */}
-      <div className="card mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">生徒を選択</label>
-        <select
-          value={selectedId ?? ''}
-          onChange={e => setSelectedId(Number(e.target.value) || null)}
-          className="input-field w-full"
-        >
-          <option value="">-- 生徒を選んでください --</option>
-          {sortedStudents.map(s => (
-            <option key={s.id} value={s.id}>{s.name}{s.grade ? ` (${s.grade})` : ''}</option>
-          ))}
-        </select>
-      </div>
-
-      {selectedId && (
-        <>
-          {/* New report form */}
-          <div className="card mb-6">
-            <h3 className="font-semibold text-gray-700 mb-4">
-              {selected?.name} への報告を追加
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">報告日</label>
-                <input
-                  type="date"
-                  value={reportDate}
-                  onChange={e => setReportDate(e.target.value)}
-                  className="input-field w-auto"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">報告内容</label>
-                <textarea
-                  value={content}
-                  onChange={e => setContent(e.target.value)}
-                  placeholder="保護者への連絡内容、保護者からの連絡など..."
-                  rows={4}
-                  className="input-field resize-none"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100">
-              <button
-                onClick={handleSave}
-                disabled={saving || !content.trim()}
-                className="btn-primary"
-              >
-                {saving ? '保存中...' : '記録を追加'}
-              </button>
-              {msg && (
-                <span className={`text-sm font-medium ${msg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>
-                  {msg}
-                </span>
-              )}
-            </div>
+      {/* Warning banner */}
+      {warnCount > 0 && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-center gap-3">
+          <span className="text-2xl flex-shrink-0">⚠️</span>
+          <div>
+            <p className="font-semibold text-amber-800">{warnCount}名が2週間以上未報告</p>
+            <p className="text-sm text-amber-600">オレンジ枠の生徒は保護者への報告が14日以上ありません</p>
           </div>
-
-          {/* Reports history */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-700">報告履歴</h3>
-              <span className="text-xs text-gray-400">{reports.length}件</span>
-            </div>
-            {reports.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-6">まだ報告がありません</p>
-            ) : (
-              <div className="space-y-3">
-                {reports.map(r => (
-                  <div key={r.id} className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-800">{r.report_date}</span>
-                        <span className="text-xs text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
-                          {r.teacher_name}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleDelete(r.id)}
-                        className="text-gray-300 hover:text-red-400 transition-colors text-xs"
-                      >
-                        削除
-                      </button>
-                    </div>
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{r.content}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {!selectedId && (
-        <div className="card text-center py-12 text-gray-400">
-          <p className="text-4xl mb-3">📞</p>
-          <p>上のセレクトまたは左のサイドバーから生徒を選んでください</p>
         </div>
       )}
+
+      {/* Date picker */}
+      <div className="card mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">報告日</label>
+        <input
+          type="date"
+          value={date}
+          onChange={e => setDate(e.target.value)}
+          className="input-field w-auto"
+        />
+      </div>
+
+      {/* Checklist */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-700">この日に保護者報告した生徒</h3>
+          <span className="text-sm text-blue-600 font-medium">{notes.size}名選択中</span>
+        </div>
+
+        {students.length === 0 ? (
+          <p className="text-gray-400 text-sm">生徒が登録されていません</p>
+        ) : (
+          <div className="space-y-5">
+            {Object.entries(studentsByGrade).sort(([a], [b]) => a.localeCompare(b, 'ja')).map(([grade, studs]) => (
+              <div key={grade}>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{grade}</p>
+                <div className="space-y-2">
+                  {studs.map(student => {
+                    const isChecked = notes.has(student.id);
+                    const days = daysSince(lastDates.get(student.id));
+                    const isWarn = days >= 14;
+                    return (
+                      <div
+                        key={student.id}
+                        className={`rounded-lg border transition-colors ${
+                          isChecked
+                            ? 'border-blue-400 bg-blue-50'
+                            : isWarn
+                            ? 'border-amber-300 bg-amber-50'
+                            : 'border-gray-200'
+                        }`}
+                      >
+                        <label className="flex items-center gap-2 p-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggle(student.id)}
+                            className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                          />
+                          <span className="text-sm font-medium text-gray-700">{student.name}</span>
+                          {isWarn && !isChecked && (
+                            <span className="text-xs text-amber-600 font-medium">
+                              ⚠️ {days === Infinity ? '未報告' : `${days}日経過`}
+                            </span>
+                          )}
+                          {isChecked && notes.get(student.id) && (
+                            <span className="ml-auto text-xs text-blue-500 truncate max-w-[150px]">
+                              {notes.get(student.id)}
+                            </span>
+                          )}
+                        </label>
+                        {isChecked && (
+                          <div className="px-3 pb-3">
+                            <textarea
+                              value={notes.get(student.id) || ''}
+                              onChange={e => setNote(student.id, e.target.value)}
+                              placeholder="一言メモ（任意）"
+                              rows={2}
+                              className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-400 bg-white resize-none placeholder-gray-300"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100">
+          <button onClick={handleSave} disabled={saving} className="btn-primary">
+            {saving ? '保存中...' : '記録を保存'}
+          </button>
+          {savedMsg && (
+            <span className={`text-sm font-medium ${savedMsg.includes('失敗') ? 'text-red-500' : 'text-green-600'}`}>
+              {savedMsg}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* All teachers on this date */}
+      <div className="card">
+        <h3 className="font-semibold text-gray-700 mb-4">{date} の全講師記録</h3>
+        {Object.keys(byTeacher).length === 0 ? (
+          <p className="text-gray-400 text-sm">この日の記録はまだありません</p>
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(byTeacher).map(([teacher, entries]) => (
+              <div key={teacher}>
+                <p className="text-sm font-semibold text-gray-700 mb-1">{teacher}</p>
+                <div className="space-y-1 pl-2">
+                  {entries.map(e => (
+                    <div key={e.id} className="flex items-start gap-2">
+                      <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5">
+                        {e.student_name}
+                      </span>
+                      {e.note && <span className="text-xs text-gray-500">{e.note}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

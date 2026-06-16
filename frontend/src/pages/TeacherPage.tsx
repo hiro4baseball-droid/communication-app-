@@ -70,7 +70,7 @@ export default function TeacherPage() {
         <EffortCard students={students} initialStudentId={selectedStudentId} />
       )}
       {activeTab === 'parent' && (
-        <ParentReportView students={students} initialStudentId={selectedStudentId} />
+        <ParentReportView students={students} />
       )}
     </Layout>
   );
