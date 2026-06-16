@@ -6,6 +6,7 @@ import authRoutes from './routes/auth';
 import studentRoutes from './routes/students';
 import communicationRoutes from './routes/communications';
 import adminRoutes from './routes/admin';
+import parentReportRoutes from './routes/parentReports';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/communications', communicationRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/parent-reports', parentReportRoutes);
 
 app.listen(PORT, () => {
   console.log(`サーバー起動: http://localhost:${PORT}`);

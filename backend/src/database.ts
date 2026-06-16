@@ -64,6 +64,16 @@ async function initSchema(): Promise<void> {
       login_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
+    `CREATE TABLE IF NOT EXISTS parent_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER NOT NULL,
+      teacher_id INTEGER NOT NULL,
+      report_date TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+      FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE
+    )`,
   ];
   await db.batch(stmts, 'write');
   // Migration: add note column (no-op if already exists)

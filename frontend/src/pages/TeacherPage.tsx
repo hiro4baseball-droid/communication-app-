@@ -6,8 +6,9 @@ import Sidebar from '../components/layout/Sidebar';
 import CommunicationLog from '../components/teacher/CommunicationLog';
 import StudentRecordView from '../components/teacher/StudentRecord';
 import EffortCard from '../components/teacher/EffortCard';
+import ParentReportView from '../components/teacher/ParentReport';
 
-type Tab = 'communication' | 'record' | 'effort';
+type Tab = 'communication' | 'record' | 'effort' | 'parent';
 
 export default function TeacherPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -27,6 +28,7 @@ export default function TeacherPage() {
     { key: 'communication', label: 'コミュニケーション記録', icon: '💬' },
     { key: 'record', label: '生徒カルテ', icon: '📋' },
     { key: 'effort', label: '頑張ったカード', icon: '🌟' },
+    { key: 'parent', label: '保護者報告', icon: '📞' },
   ];
 
   return (
@@ -66,6 +68,9 @@ export default function TeacherPage() {
       )}
       {activeTab === 'effort' && (
         <EffortCard students={students} initialStudentId={selectedStudentId} />
+      )}
+      {activeTab === 'parent' && (
+        <ParentReportView students={students} initialStudentId={selectedStudentId} />
       )}
     </Layout>
   );

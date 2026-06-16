@@ -43,6 +43,15 @@ export interface TeacherActivity {
   login_count: number;
 }
 
+export interface ParentReport {
+  id: number;
+  report_date: string;
+  content: string;
+  teacher_name: string;
+  student_name: string;
+  created_at: string;
+}
+
 export interface StudentOverview {
   id: number;
   name: string;
