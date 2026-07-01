@@ -157,9 +157,9 @@ export default function ParentReportView({ students }: Props) {
                         />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-700 truncate">{student.name}</p>
-                          {isWarn && !isChecked && (
-                            <p className="text-xs text-amber-600">
-                              ⚠️ {days === Infinity ? '未報告' : `${days}日経過`}
+                          {!isChecked && (
+                            <p className={`text-xs ${isWarn ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                              {days === Infinity ? '未報告' : isWarn ? `⚠️ ${days}日経過` : `${days}日前`}
                             </p>
                           )}
                         </div>
