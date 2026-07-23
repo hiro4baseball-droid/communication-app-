@@ -80,6 +80,10 @@ async function initSchema(): Promise<void> {
   try {
     await db.execute("ALTER TABLE communication_logs ADD COLUMN note TEXT NOT NULL DEFAULT ''");
   } catch {}
+  // Migration: add category column to parent_reports
+  try {
+    await db.execute("ALTER TABLE parent_reports ADD COLUMN category TEXT NOT NULL DEFAULT 'regular'");
+  } catch {}
 }
 
 async function seedAdmin(): Promise<void> {

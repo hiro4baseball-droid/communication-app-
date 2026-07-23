@@ -6,18 +6,11 @@ interface Props {
   students: Student[];
 }
 
-interface AllEntry {
-  id: number;
-  report_date: string;
-  teacher_name: string;
-  student_id: number;
-  student_name: string;
-}
+interface AllEntry { id: number; report_date: string; teacher_name: string; student_id: number; student_name: string; }
+interface LastDate { student_id: number; last_date: string; }
+interface CountEntry { student_id: number; count: number; }
 
-interface LastDate {
-  student_id: number;
-  last_date: string;
-}
+type Category = 'regular' | 'summer';
 
 function today(): string {
   return new Date().toISOString().split('T')[0];
@@ -29,25 +22,31 @@ function daysSince(dateStr: string | undefined): number {
 }
 
 export default function ParentReportView({ students }: Props) {
+  const [category, setCategory] = useState<Category>('regular');
   const [date, setDate] = useState(today());
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [lastDates, setLastDates] = useState<Map<number, string>>(new Map());
+  const [counts, setCounts] = useState<Map<number, number>>(new Map());
   const [allEntries, setAllEntries] = useState<AllEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
 
   const fetchData = useCallback(async () => {
-    const [mineRes, allRes, lastRes] = await Promise.all([
-      api.get<number[]>(`/parent-reports/mine?date=${date}`),
-      api.get<AllEntry[]>(`/parent-reports?date=${date}`),
-      api.get<LastDate[]>('/parent-reports/last-dates'),
+    const [mineRes, allRes, lastRes, countRes] = await Promise.all([
+      api.get<number[]>(`/parent-reports/mine?date=${date}&category=${category}`),
+      api.get<AllEntry[]>(`/parent-reports?date=${date}&category=${category}`),
+      api.get<LastDate[]>(`/parent-reports/last-dates?category=${category}`),
+      api.get<CountEntry[]>(`/parent-reports/counts?category=${category}`),
     ]);
     setChecked(new Set(mineRes.data));
     setAllEntries(allRes.data);
     const ldMap = new Map<number, string>();
     for (const e of lastRes.data) ldMap.set(e.student_id, e.last_date);
     setLastDates(ldMap);
-  }, [date]);
+    const cMap = new Map<number, number>();
+    for (const e of countRes.data) cMap.set(e.student_id, e.count);
+    setCounts(cMap);
+  }, [date, category]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -77,7 +76,7 @@ export default function ParentReportView({ students }: Props) {
     setSaving(true);
     setSavedMsg('');
     try {
-      await api.post('/parent-reports', { report_date: date, student_ids: [...checked] });
+      await api.post('/parent-reports', { report_date: date, student_ids: [...checked], category });
       setSavedMsg('保存しました');
       await fetchData();
       setTimeout(() => setSavedMsg(''), 3000);
@@ -98,7 +97,26 @@ export default function ParentReportView({ students }: Props) {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
-      <h2 className="text-xl font-bold text-gray-800 mb-6">保護者報告</h2>
+      <h2 className="text-xl font-bold text-gray-800 mb-4">保護者報告</h2>
+
+      {/* Category toggle */}
+      <div className="flex gap-2 mb-6">
+        {(['regular', 'summer'] as Category[]).map(c => (
+          <button
+            key={c}
+            onClick={() => setCategory(c)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              category === c
+                ? c === 'summer'
+                  ? 'bg-orange-500 text-white border-orange-500'
+                  : 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            {c === 'regular' ? '📅 通常' : '☀️ 夏期講習'}
+          </button>
+        ))}
+      </div>
 
       {warnCount > 0 && (
         <div className="mb-6 p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-center gap-3">
@@ -138,6 +156,7 @@ export default function ParentReportView({ students }: Props) {
                     const isChecked = checked.has(student.id);
                     const days = daysSince(lastDates.get(student.id));
                     const isWarn = days >= 14;
+                    const count = counts.get(student.id) ?? 0;
                     return (
                       <label
                         key={student.id}
@@ -155,11 +174,16 @@ export default function ParentReportView({ students }: Props) {
                           onChange={() => toggle(student.id)}
                           className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
                         />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-gray-700 truncate">{student.name}</p>
                           {!isChecked && (
                             <p className={`text-xs ${isWarn ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
                               {days === Infinity ? '未報告' : isWarn ? `⚠️ ${days}日経過` : `${days}日前`}
+                            </p>
+                          )}
+                          {category === 'summer' && (
+                            <p className={`text-xs font-medium mt-0.5 ${count > 0 ? 'text-orange-600' : 'text-gray-300'}`}>
+                              {count}回報告済み
                             </p>
                           )}
                         </div>
