@@ -1,11 +1,18 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Student } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../api/client';
 
 interface LastDate { student_id: number; last_date: string; }
 interface CountEntry { student_id: number; count: number; }
+interface Reporter { id: number; name: string; role: 'admin' | 'teacher'; }
+interface Entry { id: number; report_date: string; teacher_id: number; teacher_name: string; student_id: number; student_name: string; }
 
 type Category = 'regular' | 'summer';
+
+function today(): string {
+  return new Date().toISOString().split('T')[0];
+}
 
 function daysSince(dateStr: string | undefined): number {
   if (!dateStr) return Infinity;
@@ -13,30 +20,60 @@ function daysSince(dateStr: string | undefined): number {
 }
 
 export default function AdminParentReport() {
+  const { user } = useAuth();
   const [category, setCategory] = useState<Category>('regular');
   const [students, setStudents] = useState<Student[]>([]);
   const [lastDates, setLastDates] = useState<Map<number, string>>(new Map());
   const [counts, setCounts] = useState<Map<number, number>>(new Map());
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [reporters, setReporters] = useState<Reporter[]>([]);
+  const [date, setDate] = useState(today());
+  const [reporterId, setReporterId] = useState<number | null>(user?.id ?? null);
   const [filterGrade, setFilterGrade] = useState('all');
   const [showWarnOnly, setShowWarnOnly] = useState(false);
+  const [rank, setRank] = useState<Map<number, number>>(new Map());
+  const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     api.get<Student[]>('/students').then(r => setStudents(r.data));
+    api.get<Reporter[]>('/parent-reports/reporters').then(r => {
+      setReporters(r.data);
+      setReporterId(prev => prev ?? r.data[0]?.id ?? null);
+    });
   }, []);
 
-  useEffect(() => {
-    Promise.all([
+  // resetRank=false keeps the row order stable while checking boxes
+  const load = useCallback(async (resetRank = true) => {
+    const [lRes, cRes, eRes] = await Promise.all([
       api.get<LastDate[]>(`/parent-reports/last-dates?category=${category}`),
       api.get<CountEntry[]>(`/parent-reports/counts?category=${category}`),
-    ]).then(([lRes, cRes]) => {
-      const ldMap = new Map<number, string>();
-      for (const e of lRes.data) ldMap.set(e.student_id, e.last_date);
-      setLastDates(ldMap);
-      const cMap = new Map<number, number>();
-      for (const e of cRes.data) cMap.set(e.student_id, e.count);
-      setCounts(cMap);
-    });
-  }, [category]);
+      api.get<Entry[]>(`/parent-reports?date=${date}&category=${category}`),
+    ]);
+    const ldMap = new Map<number, string>();
+    for (const e of lRes.data) ldMap.set(e.student_id, e.last_date);
+    setLastDates(ldMap);
+    const cMap = new Map<number, number>();
+    for (const e of cRes.data) cMap.set(e.student_id, e.count);
+    setCounts(cMap);
+    setEntries(eRes.data);
+    if (resetRank) {
+      const ordered = [...students].sort((a, b) => daysSince(ldMap.get(b.id)) - daysSince(ldMap.get(a.id)));
+      setRank(new Map(ordered.map((s, i) => [s.id, i])));
+    }
+  }, [category, date, students]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // student_id -> reporters who logged a report on the selected date
+  const reportedOnDate = useMemo(() => {
+    const map = new Map<number, Entry[]>();
+    for (const e of entries) {
+      const list = map.get(e.student_id);
+      if (list) list.push(e); else map.set(e.student_id, [e]);
+    }
+    return map;
+  }, [entries]);
 
   const grades = useMemo(() => {
     const set = new Set(students.map(s => s.grade).filter(Boolean));
@@ -48,10 +85,36 @@ export default function AdminParentReport() {
       .filter(s => filterGrade === 'all' || s.grade === filterGrade)
       .map(s => ({ ...s, days: daysSince(lastDates.get(s.id)), last_date: lastDates.get(s.id), count: counts.get(s.id) ?? 0 }))
       .filter(s => !showWarnOnly || s.days >= 14)
-      .sort((a, b) => b.days - a.days);
-  }, [students, lastDates, counts, filterGrade, showWarnOnly]);
+      .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+  }, [students, lastDates, counts, filterGrade, showWarnOnly, rank]);
 
   const warnCount = students.filter(s => daysSince(lastDates.get(s.id)) >= 14).length;
+
+  async function toggle(studentId: number, checked: boolean) {
+    if (!reporterId) { setErrorMsg('報告者を選んでください'); return; }
+    setErrorMsg('');
+    setSavingIds(prev => new Set(prev).add(studentId));
+    try {
+      await api.post('/parent-reports/admin/toggle', {
+        student_id: studentId,
+        report_date: date,
+        category,
+        teacher_id: reporterId,
+        checked,
+      });
+      await load(false);
+    } catch {
+      setErrorMsg('保存に失敗しました');
+    } finally {
+      setSavingIds(prev => {
+        const next = new Set(prev);
+        next.delete(studentId);
+        return next;
+      });
+    }
+  }
+
+  const checkedCount = rows.filter(s => (reportedOnDate.get(s.id) ?? []).some(e => e.teacher_id === reporterId)).length;
 
   return (
     <div>
@@ -79,6 +142,40 @@ export default function AdminParentReport() {
             {c === 'regular' ? '📅 通常' : '☀️ 夏期講習'}
           </button>
         ))}
+      </div>
+
+      {/* Admin check controls */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">報告日</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="input-field w-auto"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">報告者</label>
+            <select
+              value={reporterId ?? ''}
+              onChange={e => setReporterId(Number(e.target.value))}
+              className="input-field w-auto"
+            >
+              {reporters.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name}{r.role === 'admin' ? '（管理者）' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="ml-auto text-right">
+            <p className="text-sm text-blue-600 font-medium">{checkedCount}名チェック済み</p>
+            <p className="text-xs text-gray-400">チェックすると即座に保存されます</p>
+            {errorMsg && <p className="text-xs text-red-500 font-medium mt-0.5">{errorMsg}</p>}
+          </div>
+        </div>
       </div>
 
       {/* Filters */}
@@ -113,6 +210,7 @@ export default function AdminParentReport() {
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 w-16 whitespace-nowrap">報告</th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">名前</th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">学年</th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">最終報告日</th>
@@ -120,16 +218,30 @@ export default function AdminParentReport() {
               {category === 'summer' && (
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">報告回数</th>
               )}
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">この日の報告者</th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">状態</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">該当する生徒がいません</td></tr>
+              <tr><td colSpan={category === 'summer' ? 8 : 7} className="px-4 py-8 text-center text-gray-400">該当する生徒がいません</td></tr>
             ) : rows.map(s => {
               const isWarn = s.days >= 14;
+              const dayEntries = reportedOnDate.get(s.id) ?? [];
+              const isChecked = dayEntries.some(e => e.teacher_id === reporterId);
+              const isSaving = savingIds.has(s.id);
               return (
-                <tr key={s.id} className={`transition-colors ${isWarn ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}`}>
+                <tr key={s.id} className={`transition-colors ${isChecked ? 'bg-blue-50 hover:bg-blue-100' : isWarn ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}`}>
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      disabled={isSaving || !reporterId}
+                      onChange={e => toggle(s.id, e.target.checked)}
+                      title={`${date} の報告としてチェック`}
+                      className="w-4 h-4 text-blue-600 rounded cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </td>
                   <td className="px-4 py-3 font-medium text-gray-800">{s.name}</td>
                   <td className="px-4 py-3 text-gray-500">{s.grade || '—'}</td>
                   <td className="px-4 py-3 text-gray-500">
@@ -145,6 +257,19 @@ export default function AdminParentReport() {
                       </span>
                     </td>
                   )}
+                  <td className="px-4 py-3">
+                    {dayEntries.length === 0 ? (
+                      <span className="text-gray-300 text-xs">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {dayEntries.map(e => (
+                          <span key={e.id} className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">
+                            {e.teacher_name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {isWarn ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
