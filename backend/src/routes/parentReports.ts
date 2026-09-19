@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { InStatement } from '@libsql/client';
 import { getDb } from '../database';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -43,13 +43,22 @@ router.get('/counts', authenticate, async (req: AuthRequest, res: Response): Pro
   } catch (e) { console.error(e); res.status(500).json({ error: 'サーバーエラー' }); }
 });
 
+// Users who can be recorded as a reporter (admins included), for the admin panel
+router.get('/reporters', authenticate, requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const db = await getDb();
+    const rs = await db.execute('SELECT id, name, role FROM users ORDER BY role ASC, name ASC');
+    res.json(rs.rows.map((r: any) => ({ id: Number(r.id), name: r.name, role: r.role })));
+  } catch (e) { console.error(e); res.status(500).json({ error: 'サーバーエラー' }); }
+});
+
 router.get('/', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   const { date, category = 'regular' } = req.query;
   if (!date) { res.json([]); return; }
   try {
     const db = await getDb();
     const rs = await db.execute({
-      sql: `SELECT pr.id, pr.report_date,
+      sql: `SELECT pr.id, pr.report_date, pr.teacher_id,
                    u.name as teacher_name, s.id as student_id, s.name as student_name
             FROM parent_reports pr
             JOIN users u ON pr.teacher_id = u.id
@@ -79,6 +88,45 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response): Promise<
       })),
     ];
     await db.batch(stmts, 'write');
+    res.json({ success: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'サーバーエラー' }); }
+});
+
+// Admin: check / uncheck a single student's report for a date, on behalf of any reporter
+router.post('/admin/toggle', authenticate, requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { student_id, report_date, category = 'regular', checked } = req.body;
+  const reporter_id = req.body.teacher_id ?? req.user!.id;
+  if (!student_id || !report_date || typeof checked !== 'boolean') {
+    res.status(400).json({ error: 'student_id, report_date, checked が必要です' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const args = [Number(student_id), Number(reporter_id), String(report_date), String(category)];
+
+    const reporter = await db.execute({ sql: 'SELECT id FROM users WHERE id = ?', args: [Number(reporter_id)] });
+    if (reporter.rows.length === 0) {
+      res.status(400).json({ error: '報告者が見つかりません' });
+      return;
+    }
+
+    if (checked) {
+      const existing = await db.execute({
+        sql: 'SELECT id FROM parent_reports WHERE student_id = ? AND teacher_id = ? AND report_date = ? AND category = ?',
+        args,
+      });
+      if (existing.rows.length === 0) {
+        await db.execute({
+          sql: "INSERT INTO parent_reports (student_id, teacher_id, report_date, content, category) VALUES (?, ?, ?, '', ?)",
+          args,
+        });
+      }
+    } else {
+      await db.execute({
+        sql: 'DELETE FROM parent_reports WHERE student_id = ? AND teacher_id = ? AND report_date = ? AND category = ?',
+        args,
+      });
+    }
     res.json({ success: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'サーバーエラー' }); }
 });
