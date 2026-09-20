@@ -62,9 +62,37 @@ npm run dev
 |---|---|
 | フロントエンド | React 18 + TypeScript + Tailwind CSS |
 | バックエンド | Node.js + Express + TypeScript |
-| データベース | SQLite (Node.js v22+ 内蔵 node:sqlite) |
+| データベース | Turso (libSQL) |
 | 認証 | JWT (24時間有効) |
+| ホスティング | Vercel (フロントエンド + APIサーバーレス関数) |
+
+## デプロイ (Vercel)
+
+フロントエンドとAPIを1つのVercelプロジェクトで動かします。
+
+- `frontend/` をビルドして静的配信
+- `api/[...path].ts` が `/api/*` をすべて受け取り、`backend/src/app.ts` のExpressアプリに渡す
+
+ビルド設定はリポジトリ直下の `vercel.json` に入っているので、Vercel側の設定は以下だけです。
+
+**1. Root Directory**
+
+Settings → Build and Deployment → Root Directory を**リポジトリ直下（空欄）**にする。
+`frontend` のままだと `api/` が見つからずAPIが動きません。
+
+**2. 環境変数** (Settings → Environment Variables)
+
+| 変数名 | 内容 |
+|---|---|
+| `TURSO_DATABASE_URL` | TursoのデータベースURL |
+| `TURSO_AUTH_TOKEN` | Tursoの認証トークン |
+| `JWT_SECRET` | 任意の長いランダム文字列 |
+
+`VITE_API_URL` は**設定しない**でください。未設定だとフロントが同じドメインの `/api` を呼びます。
+
+`FRONTEND_URL` も同一ドメインなので不要です。
 
 ## データ保存場所
 
-データベースファイル: `data/app.db`
+Turso (libSQL)。`TURSO_DATABASE_URL` で指定したデータベースに保存されます。
+ホスティング先を変えてもデータはTursoに残ります。
